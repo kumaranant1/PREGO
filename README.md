@@ -6,7 +6,7 @@
 
 
 ## NOTE ⚠️
-This is a forked repo of original PREGO (CVPR 2024) implementaiton of Alessandro Flaborea. The only difference is this repo employs training of MiniROAD model in low resource env utilizing only ~7 GB of RAM and minimal usage of GPU VRAM for step recognition. Making it easily trainable for free colab version! Look at the /step_regonition/README.md to explore more
+This is a forked repo of original PREGO (CVPR 2024) implementaiton of Alessandro Flaborea. The only difference is this repo employs training of MiniROAD model in low resource env utilizing only ~7 GB of RAM and minimal usage of GPU VRAM for step recognition. Making it easily trainable for free colab version! Look at the `/step_recognition/README.md` to explore more
 
 
 ## Index
