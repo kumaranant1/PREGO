@@ -1,8 +1,7 @@
 import gc
 import json
 import os.path as osp
-
-import ipdb
+import h5py
 import numpy as np
 import torch
 import torch.utils.data as data
@@ -20,96 +19,75 @@ FEATURE_SIZES = {
     "flow_kinetics_i3d": 2048,
 }
 
-
 @DATA_LAYERS.register("THUMOS")
 @DATA_LAYERS.register("TVSERIES")
 @DATA_LAYERS.register("ASSEMBLY101-O")
 @DATA_LAYERS.register("EPIC-TENT-O")
 class THUMOSDataset(data.Dataset):
-
     def __init__(self, cfg, mode="train"):
         self.root_path = cfg["root_path"]
         self.mode = mode
         self.training = mode == "train"
         self.window_size = cfg["window_size"]
         self.stride = cfg["stride"]
-        data_name = cfg["data_name"]
-        self.vids = json.load(open(cfg["video_list_path"]))[data_name][
+        self.data_name = cfg["data_name"]
+        
+        self.h5_path = cfg.get("h5_path", f"/content/{self.data_name}_features.h5")
+        self.video_list_path = cfg["video_list_path"]
+        self.vids = json.load(open(self.video_list_path))[self.data_name][
             mode + "_session_set"
-        ]  # [:5]  # list of video names
+        ]
+        
         self.num_classes = cfg["num_classes"]
         self.inputs = []
-        self._load_features(cfg)
-        self._init_features()
-
-    def _load_features(self, cfg):
-        self.removed = 0
+        
         self.annotation_type = cfg["annotation_type"]
         self.rgb_type = cfg["rgb_type"]
         self.flow_type = cfg["flow_type"]
+        self.rgb_dim = FEATURE_SIZES[self.rgb_type]
+        self.flow_dim = FEATURE_SIZES[self.flow_type]
+        self.zero_flow = (self.flow_type == "flow_anet_resnet50")
+
+        self._load_targets()
+        self._init_features()
+        
+        self.h5_file = None
+
+    def _load_targets(self):
+        self.removed = 0
         self.target_all = {}
-        self.rgb_inputs = {}
-        self.flow_inputs = {}
-        dummy_target = np.zeros((self.window_size - 1, self.num_classes))
-        dummy_rgb = np.zeros((self.window_size - 1, FEATURE_SIZES[cfg["rgb_type"]]))
-        dummy_flow = np.zeros((self.window_size - 1, FEATURE_SIZES[cfg["flow_type"]]))
+        self.pad_len = self.window_size - 1
+        dummy_target = np.zeros((self.pad_len, self.num_classes))
+        
+        valid_vids = []
+
         for vid in self.vids:
             try:
-                target = np.load(
-                    osp.join(self.root_path, self.annotation_type, vid + ".npy")
-                )
-                rgb = np.load(osp.join(self.root_path, self.rgb_type, vid + ".npy"))
-                # checkpoint con rgb al posto del flow
-                if cfg["flow_type"] == "flow_anet_resnet50":
-                    flow = np.load(
-                        osp.join(
-                            self.root_path + "/rgb_as_flow", self.rgb_type, vid + ".npy"
-                        )
-                    )
-                    flow = np.zeros(flow.shape)
-                else:  # checkpoint con flow
-                    my_string = (
-                        "assembly_optical_flow_BNInception/" + vid + "/assembling.npy"
-                    )
-                    flow = np.load(osp.join(self.root_path, self.flow_type, my_string))
-                # # concatting dummy target at the front
-                # ! LEO  to save train data leave these lines (within the if block) with the comment
+                target_path = osp.join(self.root_path, self.annotation_type, vid + ".npy")
+                target = np.load(target_path)
+
                 if self.training:
-                    self.target_all[vid] = np.concatenate(
-                        (dummy_target, target), axis=0
-                    )
-                    self.rgb_inputs[vid] = np.concatenate((dummy_rgb, rgb), axis=0)
-                    self.flow_inputs[vid] = np.concatenate((dummy_flow, flow), axis=0)
+                    self.target_all[vid] = np.concatenate((dummy_target, target), axis=0)
                 else:
                     self.target_all[vid] = target
-                    self.rgb_inputs[vid] = rgb
-                    self.flow_inputs[vid] = flow
+                
+                valid_vids.append(vid)
+
             except Exception as e:
-                # print excpetion
-                print("---- Exception in loading video ", e)
-                # remove the video from the list if it does not have the required features
-                self.vids.remove(vid)
                 self.removed += 1
-                print("---- Removed video ", vid)
-        print("---- Removed videos ", self.removed)
+        
+        self.vids = valid_vids
 
     def _init_features(self):
-        # del self.inputs
-        # gc.collect()
         self.inputs = []
-        # remove 'nusar-2021_action_both_9056-b08a_9056_user_id_2021-02-22_141934'
-        if (
-            "nusar-2021_action_both_9056-b08a_9056_user_id_2021-02-22_141934"
-            in self.vids
-        ):
-            self.vids.remove(
-                "nusar-2021_action_both_9056-b08a_9056_user_id_2021-02-22_141934"
-            )
-        ipdb.set_trace()
+        
+        bad_vid = "nusar-2021_action_both_9056-b08a_9056_user_id_2021-02-22_141934"
+        if bad_vid in self.vids:
+            self.vids.remove(bad_vid)
+
         for vid in self.vids:
             target = self.target_all[vid]
-            #!Leo to save train data leave these lines (within the if block) with the comment
-            ipdb.set_trace()
+            
             if self.training:
                 seed = np.random.randint(self.stride)
                 for start, end in zip(
@@ -118,22 +96,48 @@ class THUMOSDataset(data.Dataset):
                 ):
                     self.inputs.append([vid, start, end, target[start:end]])
             else:
-                start = 0
-                end = target.shape[0]
-                self.inputs.append([vid, start, end, target[start:end]])
+                self.inputs.append([vid, 0, target.shape[0], target])
 
     def __getitem__(self, index):
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.h5_path, 'r')
+            
         vid, start, end, target = self.inputs[index]
-        rgb_input = self.rgb_inputs[vid][start:end]
-        flow_input = self.flow_inputs[vid][start:end]
-        rgb_input = torch.tensor(rgb_input.astype(np.float32))
-        flow_input = torch.tensor(flow_input.astype(np.float32))
-        target = torch.tensor(target.astype(np.float32))
-        return rgb_input, flow_input, target, vid, start, end  #!  vid added by Leo
+        
+        if self.training:
+            raw_start = start - self.pad_len
+            raw_end = end - self.pad_len
+            rgb_out = np.zeros((end - start, self.rgb_dim), dtype=np.float32)
+
+            if vid in self.h5_file:
+                vid_len = self.h5_file[vid]['rgb'].shape[0]
+                read_start = max(0, raw_start)
+                read_end = min(vid_len, raw_end)
+                if read_end > read_start:
+                    chunk = self.h5_file[vid]['rgb'][read_start:read_end]
+                    buf_start = read_start - raw_start
+                    buf_end = buf_start + (read_end - read_start)
+                    rgb_out[buf_start:buf_end] = chunk
+        else:
+            if vid in self.h5_file:
+                rgb_out = self.h5_file[vid]['rgb'][start:end]
+            else:
+                rgb_out = np.zeros((end-start, self.rgb_dim), dtype=np.float32)
+
+        if self.zero_flow:
+            flow_out = np.zeros((end - start, self.flow_dim), dtype=np.float32)
+        else:
+            flow_out = np.zeros((end - start, self.flow_dim), dtype=np.float32)
+        
+        return (
+            torch.tensor(rgb_out).float(),
+            torch.tensor(flow_out).float(),
+            torch.tensor(target).float(),
+            vid, start, end
+        )
 
     def __len__(self):
         return len(self.inputs)
-
 
 @DATA_LAYERS.register("THUMOS_ANTICIPATION")
 @DATA_LAYERS.register("TVSERIES_ANTICIPATION")

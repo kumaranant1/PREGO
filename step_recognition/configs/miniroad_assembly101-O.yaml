@@ -6,14 +6,15 @@ metric: 'AP'
 optimizer: 'AdamW'
 device: 'cuda:0'
 feature_pretrained: 'kinetics'
-root_path: 'Assembly101-O'
+root_path: '/content/Assembly101-O'
+h5_path: '/content/ASSEMBLY101-O_features.h5'
 rgb_type: 'rgb_anet_resnet50'
 flow_type: 'flow_anet_resnet50' #'flow_nv_kinetics_bninception' #'flow_anet_resnet50'
 annotation_type: 'target_perframe'
-video_list_path: 'step_recognition/data_info/video_list.json'
-output_path: 'step_recognition/checkpoint_miniROAD/Assembly101-O'
+video_list_path: '/content/drive/MyDrive/BTP 2/PREGO/step_recognition/data_info/video_list.json'
+output_path: '/content/drive/MyDrive/BTP 2/PREGO/step_recognition/checkpoint_miniROAD/Assembly101-O'
 window_size: 128 #128 
-batch_size: 16 #16 #16 a train e 1 a test
+batch_size: 32 #16 #16 a train e 1 a test
 test_batch_size: 1 
 num_epoch: 10 
 lr: 0.0001 
