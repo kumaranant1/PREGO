@@ -5,6 +5,11 @@
 **[TI-PREGO paper [arXiv]](https://arxiv.org/abs/2411.02570)**
 
 
+### <span style="color:red"> **NOTE !** </span>
+---
+This is a forked repo of original PREGO (CVPR 2024) implementaiton of Alessandro Flaborea. The only difference is this repo employs training of MiniROAD model in low resource env utilizing only ~7 GB of RAM and minimal usage of GPU VRAM for step recognition. Making it easily trainable for free colab version!
+
+
 ## Index
 
 1. [Introduction](#introduction)
